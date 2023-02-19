@@ -7,3 +7,5 @@ tags: [purple]
 # Post 2
 
 Hello galaxy!
+
+## Section 2

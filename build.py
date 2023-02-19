@@ -1,14 +1,17 @@
 import datetime
 import glob
 import os
+import shutil
+
+from jinja2 import Environment, FileSystemLoader
+import pandoc
+from pydantic import BaseModel
 
 import pandoc
 import pydantic
 import yaml
 from pandoc.types import *
 from slugify import slugify
-
-post_filenames = glob.glob("blog/*.md")
 
 
 class MarkdownMetadata(pydantic.BaseModel):
@@ -19,12 +22,16 @@ class MarkdownMetadata(pydantic.BaseModel):
 
 class MarkdownContent:
     metadata_marker = "---"
+    jinja_templates_dir = "templates/"
 
     def __init__(self, filename: str, contents: str) -> None:
         self.filename = filename
         self.contents = contents
         self.metadata = self.parse_metadata(contents)
         self.body = self.parse_body(contents)
+
+        self.jinja_env = Environment(loader=FileSystemLoader(self.jinja_templates_dir))
+        self.post_template = self.jinja_env.get_template("post.html")
 
     def parse_body(self, contents: str) -> str:
         if not contents.startswith(self.metadata_marker):
@@ -56,8 +63,11 @@ class MarkdownContent:
         https://boisgera.github.io/pandoc/api/
         """
         doc = pandoc.read(self.body)
-        options = ["-s"]
-        return pandoc.write(doc, format="html", options=options)
+        html_body: str = pandoc.write(doc, format="html")
+
+        render_in: dict[str, str] = {"title": self.metadata.title, "body": html_body}
+        content = self.post_template.render(render_in)
+        return content
 
     def to_html_file(self, filename: str) -> None:
         """
@@ -71,15 +81,26 @@ class MarkdownContent:
         return self.contents
 
 
-posts: list[MarkdownContent] = []
+if __name__ == "__main__":
+    build_dir = "site"
 
-for post_filename in post_filenames:
-    with open(post_filename) as file_handle:
-        mc = MarkdownContent(post_filename, file_handle.read())
-        posts.append(mc)
+    try:
+        shutil.rmtree(build_dir)
+    except FileNotFoundError:
+        # Ignore if the directory doesn't exist
+        pass
 
-for post in posts:
-    slugged_date = slugify(str(post.metadata.date).strip())
-    slugged_title = slugify(post.metadata.title)
-    filename = os.path.join("site", f"{slugged_date}-{slugged_title}.html")
-    post.to_html_file(filename)
+    os.makedirs(build_dir, exist_ok=True)
+
+    posts: list[MarkdownContent] = []
+
+    post_filenames = glob.glob("posts/*.md")
+    for post_filename in post_filenames:
+        with open(post_filename) as file_handle:
+            mc = MarkdownContent(post_filename, file_handle.read())
+            posts.append(mc)
+
+    for post in posts:
+        slugged_title = slugify(post.metadata.title)
+        filename = os.path.join(build_dir, f"{slugged_title}.html")
+        post.to_html_file(filename)
